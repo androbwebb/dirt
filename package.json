@@ -1,7 +1,7 @@
 {
   "name": "dirt",
   "productName": "DIRT",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Disk Inspection & Removal Tool — a brutalist disk space visualizer",
   "private": true,
   "type": "module",
