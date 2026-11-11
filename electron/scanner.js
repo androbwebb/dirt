@@ -4,6 +4,11 @@
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { gzip, gunzip } from 'node:zlib';
+import { promisify } from 'node:util';
+
+const gzipAsync = promisify(gzip);
+const gunzipAsync = promisify(gunzip);
 
 export const DEFAULT_THREADS = 16;
 export const DEFAULT_MEMORY_MB = 256;
@@ -115,7 +120,12 @@ export function createShared() {
 export const nodesFor = (mb) => Math.floor((mb * 1024 * 1024) / BYTES_PER_NODE);
 
 export class Scan {
-  constructor(rootPath, shared = createShared()) {
+  /**
+   * @param {string} rootPath
+   * @param {object} shared limiter + node budget shared by all scans
+   * @param {object|null} restore cached metadata ({ meta, file }) to rebuild a finished scan lazily
+   */
+  constructor(rootPath, shared = createShared(), restore = null) {
     this.shared = shared;
     this.rootPath = path.resolve(rootPath);
     this.status = 'scanning';
@@ -134,9 +144,50 @@ export class Scan {
     this.limiter = shared.limiter;
     this.seenInodes = new Set();
     this.children = new Set();
+    /** Repo roots found during the walk (folders containing a .git dir). */
+    this.repos = new Set();
     this.allowedDevs = new Set();
     this.skipPaths = new Set(['/dev', '/Volumes', '/System/Volumes', '/net', '/home', '/cores']);
-    this.promise = this.#run();
+    this.cacheFile = null;
+    if (restore) {
+      Object.assign(this, restore.meta, { status: 'done', current: this.rootPath, cancelled: false });
+      this.cacheFile = restore.file;
+      this.cached = true;
+      this.promise = Promise.resolve();
+    } else {
+      this.promise = this.#run();
+    }
+  }
+
+  // ---------- disk cache ----------
+  /** Metadata stored next to the cached tree. */
+  meta() {
+    const { rootPath, files, dirs, bytes, errors, truncated, started, finished } = this;
+    return { rootPath, files, dirs, bytes, errors, truncated, started, finished };
+  }
+
+  /** Write the finished tree to `file` (gzipped compact JSON). */
+  async save(file) {
+    if (!this.root) return;
+    const data = await gzipAsync(JSON.stringify(pack(this.root)));
+    await fsp.writeFile(file + '.tmp', data);
+    await fsp.rename(file + '.tmp', file);
+    this.cacheFile = file;
+  }
+
+  /** Load a restored scan's tree from disk on first use. */
+  async ensureLoaded() {
+    if (this.root || !this.cacheFile) return;
+    if (!this.loading) {
+      this.loading = (async () => {
+        const raw = await gunzipAsync(await fsp.readFile(this.cacheFile));
+        let count = 0;
+        this.root = unpack(JSON.parse(raw.toString()), null, () => count++);
+        this.nodes = count;
+        this.shared.nodes += count;
+      })();
+    }
+    await this.loading;
   }
 
   cancel() {
@@ -230,6 +281,7 @@ export class Scan {
           this.shared.nodes++;
           this.bytes += size;
           node.children.push(child);
+          if (ent.name === '.git') this.repos.add(full);
           if (isOpaque(ent.name, childPath)) {
             child.opaque = true;
             opaque.push([child, childPath]);
@@ -442,9 +494,30 @@ export class Scan {
       truncated: this.truncated,
       current: this.current,
       elapsed: (this.finished || Date.now()) - this.started,
+      finishedAt: this.finished,
+      cached: !!this.cached,
       error: this.error,
     };
   }
+}
+
+// Compact tree encoding for the disk cache:
+// [name, isFile, size, count, smallSize, smallCount, opaque, err, children]
+function pack(n) {
+  return [n.name, n.type === 'file' ? 1 : 0, n.size, n.count, n.smallSize, n.smallCount, n.opaque ? 1 : 0, n.err || 0, n.children ? n.children.map(pack) : 0];
+}
+
+function unpack(a, parent, onNode) {
+  const [name, isFile, size, count, smallSize, smallCount, opaque, err, kids] = a;
+  const n = makeNode(name, isFile ? 'file' : 'dir', parent, size);
+  n.count = count;
+  n.smallSize = smallSize;
+  n.smallCount = smallCount;
+  if (opaque) n.opaque = true;
+  if (err) n.err = err;
+  onNode();
+  if (kids) n.children = kids.map((k) => unpack(k, n, onNode));
+  return n;
 }
 
 /** Roll child sizes up into a directory once all its descendants are walked. */

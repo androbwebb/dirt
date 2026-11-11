@@ -14,6 +14,21 @@ export interface TreeNode {
 export interface Settings {
   threads: number;
   memoryMb: number;
+  aiModel: string;
+}
+
+export interface AiModel {
+  id: string;
+  name: string;
+  /** USD per million tokens */
+  priceIn: number;
+  priceOut: number;
+}
+
+export interface AiFamily {
+  alias: string;
+  label: string;
+  model: AiModel | null;
 }
 
 export interface Explanation {
@@ -58,6 +73,8 @@ export interface Progress {
   truncated: boolean;
   current: string;
   elapsed: number;
+  finishedAt: number | null;
+  cached: boolean;
   error: string | null;
   volume?: { total: number; free: number } | null;
 }
@@ -66,8 +83,81 @@ type Reply<T> = { ok: true; result: T } | { ok: false; error: string };
 
 declare global {
   interface Window {
-    dirt?: { invoke(method: string, args?: unknown): Promise<Reply<unknown>>; platform: string };
+    dirt?: {
+      invoke(method: string, args?: unknown): Promise<Reply<unknown>>;
+      onAgent(cb: (e: AgentEvent) => void): () => void;
+      platform: string;
+    };
   }
+}
+
+export interface ResultItem {
+  path: string;
+  display: string;
+  name?: string;
+  kind?: string;
+  size: number | null;
+  modified?: number | null;
+  lastUsed?: number | null;
+  note: string;
+  verdict: 'safe' | 'caution' | 'keep';
+  group?: string | null;
+  missing?: boolean;
+  isWorktree?: boolean;
+}
+
+export interface ResultsPage {
+  title: string;
+  summary: string;
+  items: ResultItem[];
+  total: number;
+  model?: string;
+}
+
+export type AgentEvent = { conversationId: string } & (
+  | { type: 'step'; id?: string; tool: string; args: Record<string, unknown>; status: 'running' | 'done' | 'error'; summary?: string; ms?: number }
+  | { type: 'thought'; text: string }
+  | ({ type: 'results' } & ResultsPage)
+  | { type: 'message'; text: string; model?: string }
+  | { type: 'error'; message: string }
+  | { type: 'done' }
+);
+
+export interface WorktreeDiff {
+  worktree: string;
+  repoRoot: string;
+  branch: string;
+  base: string;
+  ahead: number;
+  behind: number;
+  files: { file: string; added: number | null; removed: number | null }[];
+  untracked: string[];
+  patch: string | null;
+  truncated: boolean;
+}
+
+export interface Checkout {
+  path: string;
+  branch: string | null;
+  missing?: boolean;
+  detached?: boolean;
+  lastCommit?: number | null;
+  lastUsed?: number | null;
+  uncommitted?: number;
+  unpushed?: number;
+  merged?: boolean | null;
+  size?: number | null;
+  deps?: number | null;
+}
+
+export interface Project {
+  repo: string;
+  name: string;
+  base: string;
+  remote: string | null;
+  main: Checkout;
+  worktrees: Checkout[];
+  size: number | null;
 }
 
 async function call<T>(method: string, args?: unknown): Promise<T> {
@@ -84,6 +174,18 @@ export const api = {
   getSettings: () => call<SettingsInfo>('getSettings'),
   setApiKey: (key: string) => call<{ hasKey: boolean; hint: string | null }>('setApiKey', { key }),
   explain: (root: string, path: string) => call<Explanation>('explain', { root, path }),
+  aiModels: () => call<AiModel[]>('aiModels'),
+  agentStart: (conversationId: string, query: string) => call<{ ok: true }>('agentStart', { conversationId, query }),
+  agentCancel: (conversationId: string) => call<{ ok: true }>('agentCancel', { conversationId }),
+  agentReset: (conversationId: string) => call<{ ok: true }>('agentReset', { conversationId }),
+  trashPaths: (paths: string[]) => call<{ trashed: string[]; failed: { path: string; error: string }[] }>('trashPaths', { paths }),
+  worktreeDiff: (path: string) => call<WorktreeDiff>('worktreeDiff', { path }),
+  revealPath: (path: string) => call<{ ok: true }>('revealPath', { path }),
+  projects: (refresh = false) => call<{ roots: string[]; repos: Project[] }>('projects', { refresh }),
+  removeWorktree: (path: string) => call<{ repo: string; stashed: boolean }>('removeWorktree', { path }),
+  pruneWorktrees: (repo: string) => call<{ ok: true }>('pruneWorktrees', { repo }),
+  analyzeRepo: (repo: string) => call<ResultsPage>('analyzeRepo', { repo }),
+  aiFamilies: () => call<AiFamily[]>('aiFamilies'),
   setSettings: (s: Partial<Settings>) => call<Settings>('setSettings', s),
   status: (root: string) => call<Progress>('status', { root }),
   /** Stop a running scan and/or forget its results. */

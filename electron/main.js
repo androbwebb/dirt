@@ -1,5 +1,8 @@
 import { app, BrowserWindow, ipcMain, shell, utilityProcess, nativeTheme, Notification, safeStorage } from 'electron';
-import { explain } from './ai.js';
+import { explain, listModels, families, resolveModel, DEFAULT_MODEL } from './ai.js';
+import { runAgent } from './agent.js';
+import { listProjects, defaultRoots, removeWorktree, pruneWorktrees, analyzeRepo } from './git.js';
+import { execFile } from 'node:child_process';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -11,7 +14,7 @@ const HOME = os.homedir();
 
 // ---------- settings ----------
 const LIMITS = { threads: [1, 64], memoryMb: [64, 4096] };
-const DEFAULTS = { threads: 16, memoryMb: 256 };
+const DEFAULTS = { threads: 16, memoryMb: 256, aiModel: DEFAULT_MODEL };
 let settings = { ...DEFAULTS };
 const settingsFile = () => path.join(app.getPath('userData'), 'settings.json');
 
@@ -24,13 +27,16 @@ function sanitize(s) {
   return {
     threads: clampInt(s?.threads, LIMITS.threads, settings.threads),
     memoryMb: clampInt(s?.memoryMb, LIMITS.memoryMb, settings.memoryMb),
+    aiModel: typeof s?.aiModel === 'string' && /^@?[\w.\-/:]{3,100}$/.test(s.aiModel.trim()) ? s.aiModel.trim() : settings.aiModel,
   };
 }
 
-// ---------- Claude API key (encrypted with the macOS Keychain) ----------
-const keyFile = () => path.join(app.getPath('userData'), 'anthropic-key.bin');
+// ---------- OpenRouter API key (encrypted with the macOS Keychain) ----------
+const keyFile = () => path.join(app.getPath('userData'), 'openrouter-key.bin');
 
 async function readApiKey() {
+  // Dev/automation convenience: an env key wins over the stored one.
+  if (process.env.OPENROUTER_API_KEY) return process.env.OPENROUTER_API_KEY;
   try {
     return safeStorage.decryptString(await fsp.readFile(keyFile()));
   } catch {
@@ -75,7 +81,7 @@ function startWorker() {
   });
   workerReady = new Promise((resolve) => worker.once('spawn', resolve));
   worker.on('spawn', () => {
-    ask('configure', settings).catch(() => {});
+    ask('configure', { ...settings, cacheDir: path.join(app.getPath('userData'), 'scans') }).catch(() => {});
     // Low CPU priority so a big scan never starves the rest of the Mac.
     try {
       os.setPriority(worker.pid, 10);
@@ -149,7 +155,10 @@ function watchScan(root) {
       const p = byRoot.get(root);
       if (p && p.status === 'scanning') continue;
       watching.delete(root);
-      if (p?.status === 'done' && !BrowserWindow.getFocusedWindow()) notifyDone(p);
+      if (p?.status === 'done') {
+        ask('repos', { root }).then((r) => addProjects(r), () => {});
+        if (!BrowserWindow.getFocusedWindow()) notifyDone(p);
+      }
     }
     if (watching.size === 0) {
       clearInterval(watchTimer);
@@ -218,7 +227,36 @@ async function listPlaces() {
 const PROTECTED = new Set(['/', HOME, '/Users', '/Applications', '/System', '/Library', '/usr', '/bin', '/sbin', '/private', '/etc', '/var']);
 const isProtected = (p) => PROTECTED.has(p) || /^\/(System|usr|bin|sbin)\//.test(p);
 
+// ---------- projects registry (repos found by scans + usual project folders) ----------
+const projectsFile = () => path.join(app.getPath('userData'), 'projects.json');
+let projectRepos = null;
+
+async function loadProjects() {
+  if (projectRepos) return projectRepos;
+  try {
+    projectRepos = new Set(JSON.parse(await fsp.readFile(projectsFile(), 'utf8')).repos || []);
+  } catch {
+    projectRepos = new Set();
+  }
+  return projectRepos;
+}
+
+async function addProjects(paths) {
+  const set = await loadProjects();
+  const before = set.size;
+  for (const p of paths) set.add(p);
+  if (set.size !== before) await fsp.writeFile(projectsFile(), JSON.stringify({ repos: [...set].sort() }, null, 2));
+}
+
+let projectsCache = { at: 0, data: null };
+
 // ---------- IPC ----------
+const conversations = new Map();
+
+function broadcast(channel, payload) {
+  for (const w of BrowserWindow.getAllWindows()) w.webContents.send(channel, payload);
+}
+
 const api = {
   async locations() {
     return { volumes: await listVolumes(), places: await listPlaces(), home: HOME };
@@ -241,8 +279,157 @@ const api = {
   async explain({ root, path: p }) {
     // Pull the node from the scan itself (not from the renderer) with one level of children.
     const { tree } = await ask('tree', { root, path: p, depth: 1 });
-    return explain(tree, await readApiKey());
+    return explain(tree, { apiKey: await readApiKey(), model: settings.aiModel });
   },
+  aiModels: () => listModels(),
+
+  // ---------- git projects ----------
+  async projects({ refresh } = {}) {
+    if (!refresh && projectsCache.data && Date.now() - projectsCache.at < 5 * 60_000) return projectsCache.data;
+    const roots = await defaultRoots();
+    const known = [...(await loadProjects())];
+    const fromRoots = await listProjects(roots, { sizes: true });
+    const seen = new Set(fromRoots.map((r) => r.repo));
+    const extra = [];
+    for (const r of known) {
+      if (seen.has(r)) continue;
+      if (!(await fsp.stat(path.join(r, '.git')).then(() => true, () => false))) continue;
+      extra.push(...(await listProjects([r], { sizes: true })).filter((x) => x.repo === r));
+    }
+    const repos = [...fromRoots, ...extra];
+    await addProjects(repos.map((r) => r.repo));
+    // Repo sizes from cached scans when available (cheap); otherwise unknown.
+    const sizes = await ask('sizes', { paths: repos.map((r) => r.repo) }).catch(() => ({}));
+    for (const r of repos) r.size = sizes[r.repo] ?? null;
+    projectsCache = { at: Date.now(), data: { roots, repos } };
+    return projectsCache.data;
+  },
+  async removeWorktree({ path: p }) {
+    const r = await removeWorktree(p);
+    projectsCache.at = 0;
+    return r;
+  },
+  async pruneWorktrees({ repo }) {
+    projectsCache.at = 0;
+    return pruneWorktrees(repo);
+  },
+  async analyzeRepo({ repo }) {
+    return analyzeRepo(repo, { apiKey: await readApiKey(), model: await resolveModel(settings.aiModel) });
+  },
+  async revealPath({ path: p }) {
+    await fsp.lstat(p);
+    shell.showItemInFolder(p);
+    return { ok: true };
+  },
+
+  // ---------- Ask DIRT agent ----------
+  async agentStart({ conversationId, query }) {
+    if (typeof query !== 'string' || !query.trim()) throw new Error('Empty question');
+    let convo = conversations.get(conversationId);
+    if (!convo) conversations.set(conversationId, (convo = { history: [], controller: null }));
+    if (convo.controller) throw new Error('Still working on the last question');
+    const controller = new AbortController();
+    convo.controller = controller;
+    const emit = (evt) => broadcast('dirt:agent', { conversationId, ...evt });
+    (async () => {
+      try {
+        await runAgent({
+          query: query.trim(),
+          history: convo.history,
+          apiKey: await readApiKey(),
+          model: await resolveModel(settings.aiModel),
+          ask,
+          emit,
+          signal: controller.signal,
+        });
+        emit({ type: 'done' });
+      } catch (e) {
+        emit({ type: 'error', message: e.message });
+      } finally {
+        convo.controller = null;
+      }
+    })();
+    return { ok: true };
+  },
+  agentCancel({ conversationId }) {
+    conversations.get(conversationId)?.controller?.abort();
+    return { ok: true };
+  },
+  agentReset({ conversationId }) {
+    conversations.get(conversationId)?.controller?.abort();
+    conversations.delete(conversationId);
+    return { ok: true };
+  },
+
+  /** Trash arbitrary paths (from an Ask results page). */
+  async trashPaths({ paths }) {
+    if (!Array.isArray(paths) || !paths.length) throw new Error('Nothing to trash');
+    const done = [];
+    const failed = [];
+    for (const raw of paths) {
+      const p = path.resolve(String(raw));
+      if (isProtected(p) || p.split('/').length < 3) {
+        failed.push({ path: p, error: 'protected path' });
+        continue;
+      }
+      try {
+        await fsp.lstat(p);
+        await shell.trashItem(p);
+        done.push(p);
+      } catch (e) {
+        failed.push({ path: p, error: e.message });
+      }
+    }
+    await ask('remove', { root: null, paths: done }).catch(() => {});
+    return { trashed: done, failed };
+  },
+
+  /** Diff a worktree against its repo's main/master since the branch point. */
+  async worktreeDiff({ path: p }) {
+    const git = (args, max = 4 * 1024 * 1024) =>
+      new Promise((resolve) => execFile('git', ['-C', p, ...args], { maxBuffer: max, timeout: 30_000 }, (err, out) => resolve(err ? null : String(out))));
+    const top = (await git(['rev-parse', '--show-toplevel']))?.trim();
+    if (!top) throw new Error('Not a git checkout');
+    const common = (await git(['rev-parse', '--path-format=absolute', '--git-common-dir']))?.trim();
+    const repoRoot = common && common.endsWith('/.git') ? path.dirname(common) : top;
+    const branch = (await git(['branch', '--show-current']))?.trim() || '(detached)';
+    let base = null;
+    for (const b of ['main', 'master', 'origin/main', 'origin/master']) {
+      if ((await git(['rev-parse', '--verify', '--quiet', b])) !== null) {
+        base = b;
+        break;
+      }
+    }
+    if (!base) throw new Error('No main or master branch found');
+    const mb = (await git(['merge-base', base, 'HEAD']))?.trim();
+    const [stat, patch, untracked, ahead, behind] = await Promise.all([
+      git(['diff', '--numstat', mb]),
+      git(['diff', '--no-color', '--no-ext-diff', mb], 3 * 1024 * 1024),
+      git(['ls-files', '--others', '--exclude-standard']),
+      git(['rev-list', '--count', `${base}..HEAD`]),
+      git(['rev-list', '--count', `HEAD..${base}`]),
+    ]);
+    const files = (stat || '')
+      .split('\n')
+      .filter(Boolean)
+      .map((l) => {
+        const [a, d, f] = l.split('\t');
+        return { file: f, added: a === '-' ? null : +a, removed: d === '-' ? null : +d };
+      });
+    return {
+      worktree: p,
+      repoRoot,
+      branch,
+      base,
+      ahead: parseInt(ahead, 10) || 0,
+      behind: parseInt(behind, 10) || 0,
+      files,
+      untracked: (untracked || '').split('\n').filter(Boolean).slice(0, 300),
+      patch: patch === null ? null : patch.slice(0, 1_500_000),
+      truncated: patch !== null && patch.length > 1_500_000,
+    };
+  },
+  aiFamilies: () => families(),
   async setApiKey({ key }) {
     const k = typeof key === 'string' ? key.trim() : '';
     await writeApiKey(k);
@@ -331,6 +518,9 @@ function createWindow() {
   });
   win.once('ready-to-show', () => {
     win.show();
+    if (process.env.DIRT_SCREENSHOTS) {
+      import('./screenshots.js').then(({ captureScreens }) => captureScreens(win, process.env.DIRT_SCREENSHOTS, app));
+    }
     if (watchTimer) win.setProgressBar(2);
   });
   // Never navigate away from the app or open new windows.
@@ -344,6 +534,7 @@ function createWindow() {
 
 app.whenReady().then(async () => {
   await loadSettings();
+  if (DEV_URL && app.dock) app.dock.setIcon(path.join(HERE, '..', 'build', 'icon.png'));
   startWorker();
   createWindow();
   app.on('activate', showWindow);

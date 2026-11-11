@@ -1,16 +1,17 @@
 import '@fontsource-variable/archivo/wdth.css';
 import '@fontsource-variable/jetbrains-mono';
 import './style.css';
-import { api, type Explanation, type Progress, type TreeNode, type Volume, type Place, type SettingsInfo } from './api';
-import { bytes, bytesParts, clock, esc, int, pct, shortPath } from './format';
+import { api, type AiFamily, type AiModel, type Checkout, type Project, type Explanation, type Progress, type TreeNode, type Volume, type Place, type SettingsInfo } from './api';
+import { ago, bytes, bytesParts, clock, esc, int, pct, shortPath } from './format';
 import { Sunburst, PALETTE, type Transition } from './sunburst';
 import { startDrag } from './drag';
+import { createAsk } from './ask';
 
 const app = document.getElementById('app')!;
 let home = '';
 let pollTimer = 0;
 
-type ViewName = 'home' | 'scan' | 'results' | 'settings';
+type ViewName = 'home' | 'scan' | 'results' | 'settings' | 'ask';
 const current: { view: ViewName; root: string | null } = { view: 'home', root: null };
 let scans: Progress[] = [];
 
@@ -21,6 +22,7 @@ app.innerHTML = `
     <div class="tagline">Disk<br/>Inspection &amp;<br/>Removal Tool</div>
     <nav class="tabs" id="tabs"></nav>
     <div class="topbar-right">
+      <button class="btn btn-sm btn-ask" id="ask-btn"><span class="ai-spark">✦</span> Ask DIRT</button>
       <button class="btn btn-sm" id="settings-btn">Settings</button>
     </div>
   </header>
@@ -30,6 +32,16 @@ app.innerHTML = `
 const view = document.getElementById('view')!;
 document.getElementById('logo')!.addEventListener('click', () => void showHome());
 document.getElementById('settings-btn')!.addEventListener('click', () => void showSettings());
+document.getElementById('ask-btn')!.addEventListener('click', () => ask.show());
+
+const ask = createAsk({
+  view,
+  enter: () => setView('ask'),
+  isActive: () => current.view === 'ask',
+  toast: (m, k) => toast(m, k),
+  home: () => home,
+  openSettings: () => void showSettings(),
+});
 
 function setView(v: ViewName, root: string | null = null) {
   clearInterval(pollTimer);
@@ -37,6 +49,7 @@ function setView(v: ViewName, root: string | null = null) {
   current.view = v;
   current.root = root;
   document.getElementById('settings-btn')!.classList.toggle('btn-ink', v === 'settings');
+  document.getElementById('ask-btn')!.classList.toggle('is-on', v === 'ask');
   renderTabs();
 }
 
@@ -77,7 +90,7 @@ function renderTabs() {
       <span class="tab ${active ? 'is-active' : ''} is-${s.status}" data-root="${esc(s.rootPath)}" title="${esc(s.rootPath)}">
         ${s.status === 'scanning' ? '<span class="running-dot"></span>' : ''}
         <span class="tab-name">${esc(displayName(s.rootPath))}</span>
-        <span class="tab-size">${s.status === 'error' ? 'Error' : bytes(s.bytes)}</span>
+        <span class="tab-size">${s.status === 'error' ? 'Error' : bytes(s.bytes)}${s.status === 'done' ? ` · ${ago(s.finishedAt)}` : ''}</span>
         <button class="tab-x" data-close="${esc(s.rootPath)}" title="${s.status === 'scanning' ? 'Stop' : 'Close'}">✕</button>
       </span>`;
     })
@@ -153,7 +166,7 @@ async function showHome() {
     const st = stateOf(p);
     if (st === 'scanning') return `<button class="btn btn-acid" data-goto="${esc(p)}">View scan <span class="arrow">→</span></button>`;
     if (st === 'done')
-      return `<span class="card-actions"><button class="btn btn-ink" data-goto="${esc(p)}">View results <span class="arrow">→</span></button><button class="btn btn-sm" data-scan="${esc(p)}">Rescan ↻</button></span>`;
+      return `<span class="card-actions"><button class="btn btn-ink" data-goto="${esc(p)}">View results <span class="arrow">→</span></button><button class="btn btn-sm" data-scan="${esc(p)}">Rescan ↻</button><span class="scanned-ago">Scanned ${ago(scanOf(p)?.finishedAt)}</span></span>`;
     return `<button class="btn ${cls}" data-scan="${esc(p)}">${label} <span class="arrow">→</span></button>`;
   };
 
@@ -164,6 +177,11 @@ async function showHome() {
           <span class="fit">Where did all your</span>
           <span class="fit"><mark>space</mark> go<span class="q">?</span></span>
         </h1>
+        <form class="ask-form ask-home" id="home-ask">
+          <span class="ask-prompt"><span class="ai-spark">✦</span> Ask DIRT</span>
+          <textarea id="home-ask-input" rows="1" spellcheck="false" placeholder="Find old installers in Downloads · Which worktrees can I delete?"></textarea>
+          <button class="btn btn-acid" type="submit">Ask <span class="arrow">→</span></button>
+        </form>
       </div>
 
       <h3 class="section-label"><span>01</span> Volumes</h3>
@@ -208,7 +226,7 @@ async function showHome() {
               st === 'scanning'
                 ? `Scanning · <span data-live-root="${esc(p.path)}">${bytes(scanOf(p.path)!.bytes)}</span>`
                 : st === 'done'
-                  ? `${bytes(scanOf(p.path)!.bytes)} · view results`
+                  ? `${bytes(scanOf(p.path)!.bytes)} · ${ago(scanOf(p.path)!.finishedAt)}`
                   : esc(shortPath(p.path, home, 28))
             }</span>
             <span class="arrow">→</span>
@@ -217,7 +235,10 @@ async function showHome() {
           .join('')}
       </div>
 
-      <h3 class="section-label"><span>03</span> Anywhere</h3>
+      <h3 class="section-label"><span>03</span> Git projects</h3>
+      <div class="projects" id="projects"><div class="loading-block">FINDING REPOS…</div></div>
+
+      <h3 class="section-label"><span>04</span> Anywhere</h3>
       <form class="custom" id="custom">
         <input id="custom-path" type="text" spellcheck="false" autocomplete="off" placeholder="~/Projects or /Volumes/Archive" />
         <button class="btn btn-acid" type="submit">Scan <span class="arrow">→</span></button>
@@ -225,6 +246,19 @@ async function showHome() {
     </section>`;
 
   fitHeadline();
+  const homeAsk = document.getElementById('home-ask-input') as HTMLTextAreaElement;
+  homeAsk.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      document.getElementById('home-ask')!.dispatchEvent(new Event('submit', { cancelable: true }));
+    }
+  });
+  document.getElementById('home-ask')!.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const q = homeAsk.value.trim();
+    if (q) ask.show(q);
+  });
+  void loadProjects(false);
   view.querySelectorAll<HTMLElement>('[data-goto]').forEach((b) => b.addEventListener('click', () => openScan(b.dataset.goto!)));
   view.querySelectorAll<HTMLElement>('[data-scan]').forEach((b) => b.addEventListener('click', () => void beginScan(b.dataset.scan!)));
   document.getElementById('custom')!.addEventListener('submit', (e) => {
@@ -234,6 +268,160 @@ async function showHome() {
     const v = raw.replace(/^~(?=$|\/)/, home).replace(/\/+$/, '') || '/';
     if (stateOf(v)) return openScan(v);
     void beginScan(v);
+  });
+}
+
+// ---------- GIT PROJECTS ----------
+let projectsShowAll = false;
+const armed = new Set<string>();
+
+async function loadProjects(refresh: boolean) {
+  const el = document.getElementById('projects');
+  if (!el) return;
+  if (refresh) el.innerHTML = '<div class="loading-block">FINDING REPOS…</div>';
+  let data: { roots: string[]; repos: Project[] };
+  try {
+    data = await api.projects(refresh);
+  } catch (e) {
+    el.innerHTML = `<div class="error-block">${esc((e as Error).message)}</div>`;
+    return;
+  }
+  if (current.view !== 'home') return;
+  renderProjects(data.repos, data.roots);
+}
+
+function wtBadges(c: Checkout, isMain: boolean) {
+  const b: string[] = [];
+  if (c.missing) b.push('<span class="badge b-red">Folder missing</span>');
+  if (!isMain && c.merged) b.push('<span class="badge b-green">Merged</span>');
+  if (c.unpushed) b.push(`<span class="badge b-acid">${c.unpushed} unpushed</span>`);
+  if (c.uncommitted) b.push(`<span class="badge b-ink">${c.uncommitted} uncommitted</span>`);
+  return b.join('');
+}
+
+function renderProjects(repos: Project[], roots: string[]) {
+  const el = document.getElementById('projects');
+  if (!el) return;
+  const sorted = [...repos].sort(
+    (a, b) => b.worktrees.length - a.worktrees.length || (b.size ?? -1) - (a.size ?? -1) || (b.main.lastUsed ?? 0) - (a.main.lastUsed ?? 0),
+  );
+  const wtCount = repos.reduce((s, r) => s + r.worktrees.length, 0);
+  const wtBytes = repos.reduce((s, r) => s + r.worktrees.reduce((x, w) => x + (w.size ?? 0), 0), 0);
+  const shown = projectsShowAll ? sorted : sorted.slice(0, Math.max(8, sorted.filter((r) => r.worktrees.length).length));
+
+  el.innerHTML = `
+    <div class="proj-summary">
+      <div class="proj-stat"><b>${repos.length}</b><span>repos</span></div>
+      <div class="proj-stat"><b>${wtCount}</b><span>worktrees</span></div>
+      <div class="proj-stat proj-stat-acid"><b>${bytes(wtBytes)}</b><span>in worktrees</span></div>
+      <div class="proj-roots">${roots.map((r) => `<code>${esc(shortPath(r, home, 30))}</code>`).join(' ')}</div>
+      <button class="btn btn-sm" id="proj-refresh">Refresh ↻</button>
+    </div>
+    <div class="proj-list">
+      ${shown
+        .map(
+          (r) => `
+        <article class="proj ${r.worktrees.length ? 'has-wt' : ''}" data-repo="${esc(r.repo)}">
+          <div class="proj-head">
+            <div class="proj-id">
+              <div class="proj-name">${esc(r.name)}${r.main.branch ? `<span class="proj-branch">${esc(r.main.branch)}</span>` : ''}</div>
+              <div class="proj-meta">${esc(shortPath(r.repo, home, 48))}${r.main.lastUsed ? ` · used ${ago(r.main.lastUsed)}` : ''}</div>
+            </div>
+            <div class="proj-badges">${wtBadges(r.main, true)}</div>
+            <div class="proj-size">${r.size != null ? bytes(r.size) : '<span class="muted">—</span>'}</div>
+            <div class="proj-actions">
+              <button class="mini mini-ai" data-act="analyze" title="AI: find build output and junk">Analyze ✦</button>
+              <button class="mini" data-act="scan" title="Scan this repo">Scan</button>
+              <button class="mini" data-act="reveal" data-path="${esc(r.repo)}" title="Reveal in Finder">↗</button>
+            </div>
+          </div>
+          ${
+            r.worktrees.length
+              ? `<ul class="wt-list">${r.worktrees
+                  .map(
+                    (w) => `
+              <li class="wt ${w.missing ? 'is-missing' : ''}" data-wt="${esc(w.path)}">
+                <span class="wt-branch">${esc(w.branch ?? (w.detached ? 'detached' : '—'))}</span>
+                <span class="wt-path">${esc(shortPath(w.path, home, 60))}</span>
+                <span class="wt-used">${w.lastUsed ? `used ${ago(w.lastUsed)}` : ''}</span>
+                <span class="wt-badges">${wtBadges(w, false)}</span>
+                <span class="wt-size">${w.size != null ? `<b>${bytes(w.size)}</b>` : ''}${w.deps ? `<small>${bytes(w.deps)} deps</small>` : ''}</span>
+                <span class="wt-actions">
+                  ${
+                    w.missing
+                      ? '<button class="mini" data-act="prune">Prune</button>'
+                      : `<button class="mini mini-ai" data-act="diff">Diff</button>
+                         <button class="mini" data-act="reveal" data-path="${esc(w.path)}">↗</button>
+                         ${w.deps ? '<button class="mini" data-act="deps" title="Move node_modules / target to Trash">Trash deps</button>' : ''}
+                         <button class="mini ${armed.has(w.path) ? 'mini-armed' : 'mini-bin'}" data-act="remove">${armed.has(w.path) ? 'Confirm remove' : 'Remove'}</button>`
+                  }
+                </span>
+              </li>`,
+                  )
+                  .join('')}</ul>`
+              : ''
+          }
+        </article>`,
+        )
+        .join('')}
+    </div>
+    ${sorted.length > shown.length || projectsShowAll ? `<button class="btn btn-sm proj-more" id="proj-more">${projectsShowAll ? 'Show fewer' : `Show all ${sorted.length} repos`}</button>` : ''}`;
+
+  el.querySelector('#proj-refresh')?.addEventListener('click', () => void loadProjects(true));
+  el.querySelector('#proj-more')?.addEventListener('click', () => {
+    projectsShowAll = !projectsShowAll;
+    renderProjects(repos, roots);
+  });
+
+  el.querySelectorAll<HTMLElement>('.proj').forEach((card) => {
+    const repo = repos.find((r) => r.repo === card.dataset.repo)!;
+    card.addEventListener('click', async (e) => {
+      const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-act]');
+      if (!btn) return;
+      const act = btn.dataset.act;
+      const wtEl = btn.closest<HTMLElement>('[data-wt]');
+      const wt = wtEl?.dataset.wt;
+      try {
+        if (act === 'reveal') return void (await api.revealPath(btn.dataset.path!));
+        if (act === 'scan') return void beginScan(repo.repo);
+        if (act === 'diff' && wt) return void ask.showDiff(wt);
+        if (act === 'analyze') {
+          btn.disabled = true;
+          btn.textContent = 'Analyzing…';
+          const page = await api.analyzeRepo(repo.repo);
+          return ask.showPage(`Analyze ${repo.name}`, page);
+        }
+        if (act === 'prune') {
+          await api.pruneWorktrees(repo.repo);
+          toast('Pruned missing worktree entries.');
+          return void loadProjects(true);
+        }
+        if (act === 'deps' && wt) {
+          const r = await api.trashPaths([`${wt}/node_modules`, `${wt}/target`]);
+          toast(r.trashed.length ? `Moved ${r.trashed.length} dependency folder${r.trashed.length > 1 ? 's' : ''} to Trash.` : 'Nothing to trash.');
+          return void loadProjects(true);
+        }
+        if (act === 'remove' && wt) {
+          if (!armed.has(wt)) {
+            armed.add(wt);
+            setTimeout(() => armed.delete(wt), 6000);
+            return renderProjects(repos, roots);
+          }
+          armed.delete(wt);
+          btn.disabled = true;
+          btn.textContent = 'Removing…';
+          const r = await api.removeWorktree(wt);
+          toast(r.stashed ? 'Worktree removed. Uncommitted changes were stashed in the repo; the branch is kept.' : 'Worktree removed. The branch is kept.');
+          return void loadProjects(true);
+        }
+      } catch (err) {
+        toast((err as Error).message, 'err');
+        if (act === 'analyze') {
+          btn.disabled = false;
+          btn.textContent = 'Analyze ✦';
+        }
+      }
+    });
   });
 }
 
@@ -316,14 +504,22 @@ async function showSettings() {
       </div>
       <article class="card setting setting-wide" style="--accent:${PALETTE[4]}">
         <div class="setting-head">
-          <h2>Claude API key</h2>
+          <h2>OpenRouter</h2>
           <div class="key-state ${info.apiKey.hasKey ? 'is-set' : ''}" id="key-state">${info.apiKey.hasKey ? `Saved ••••${esc(info.apiKey.hint ?? '')}` : 'Not set'}</div>
         </div>
         <form class="custom" id="key-form">
-          <input id="key-input" type="password" spellcheck="false" autocomplete="off" placeholder="sk-ant-…" />
+          <input id="key-input" type="password" spellcheck="false" autocomplete="off" placeholder="sk-or-…" />
           <button class="btn btn-acid" type="submit">Save</button>
           <button class="btn" type="button" id="key-clear" ${info.apiKey.hasKey ? '' : 'hidden'}>Remove</button>
         </form>
+        <div class="families" id="families"><div class="fam-loading">Loading models…</div></div>
+        <details class="all-models" id="all-models">
+          <summary>All models</summary>
+          <div class="model-pick">
+            <input id="model-filter" type="text" spellcheck="false" autocomplete="off" placeholder="Filter: deepseek, qwen, llama…" />
+            <select id="model-select" size="8"><option>Loading…</option></select>
+          </div>
+        </details>
       </article>
       <div class="settings-foot">
         <button class="btn" id="reset">Reset to defaults</button>
@@ -396,6 +592,73 @@ async function showSettings() {
       toast((err as Error).message, 'err');
     }
   });
+  // Model picker: "@latest" families as big buttons, plus the full list.
+  const famEl = document.getElementById('families')!;
+  const sel = document.getElementById('model-select') as HTMLSelectElement;
+  const filter = document.getElementById('model-filter') as HTMLInputElement;
+  let models: AiModel[] = [];
+  let fams: AiFamily[] = [];
+  let currentModel = settings.aiModel;
+  // Typical question: ~2k tokens in, ~600 out (incl. reasoning).
+  const perQuestion = (m: AiModel) => (m.priceIn * 2000 + m.priceOut * 600) / 1e6;
+  const money = (n: number) => (n === 0 ? 'free' : n < 0.01 ? `$${n.toFixed(4)}` : `$${n.toFixed(3)}`);
+  const flashSaved = () => {
+    const el = document.getElementById('saved');
+    if (el) {
+      el.hidden = false;
+      window.setTimeout(() => (el.hidden = true), 1400);
+    }
+  };
+  const renderFamilies = () => {
+    const custom = !currentModel.startsWith('@') ? models.find((m) => m.id === currentModel) : null;
+    famEl.innerHTML =
+      fams
+        .map(
+          (f) => `
+        <button class="fam ${f.alias === currentModel ? 'is-on' : ''}" data-alias="${esc(f.alias)}" ${f.model ? '' : 'disabled'}>
+          <span class="fam-label">${esc(f.label)}</span>
+          <span class="fam-id">${f.model ? esc(f.model.id.split('/')[1]) : 'unavailable'}</span>
+          <span class="fam-price">${f.model ? `≈${money(perQuestion(f.model))}` : ''}</span>
+        </button>`,
+        )
+        .join('') +
+      (custom
+        ? `<div class="fam is-on fam-custom"><span class="fam-label">Custom</span><span class="fam-id">${esc(custom.id)}</span><span class="fam-price">≈${money(perQuestion(custom))}</span></div>`
+        : '');
+    famEl.querySelectorAll<HTMLElement>('[data-alias]').forEach((b) => b.addEventListener('click', () => void choose(b.dataset.alias!)));
+  };
+  const renderModels = () => {
+    const q = filter.value.trim().toLowerCase();
+    const shown = models.filter((m) => !q || m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q));
+    sel.innerHTML = shown
+      .map(
+        (m) =>
+          `<option value="${esc(m.id)}" ${m.id === currentModel ? 'selected' : ''}>${esc(m.id)}  ·  $${m.priceIn.toFixed(2)} / $${m.priceOut.toFixed(2)}</option>`,
+      )
+      .join('');
+  };
+  const choose = async (id: string) => {
+    try {
+      currentModel = (await api.setSettings({ aiModel: id })).aiModel;
+      renderFamilies();
+      renderModels();
+      flashSaved();
+    } catch (err) {
+      toast((err as Error).message, 'err');
+    }
+  };
+  filter.addEventListener('input', renderModels);
+  sel.addEventListener('change', () => void choose(sel.value));
+  Promise.all([api.aiFamilies(), api.aiModels()])
+    .then(([f, list]) => {
+      fams = f;
+      models = list;
+      renderFamilies();
+      renderModels();
+    })
+    .catch((err) => {
+      famEl.innerHTML = `<div class="ai-error">${esc((err as Error).message)}</div>`;
+    });
   document.getElementById('key-clear')!.addEventListener('click', async () => {
     const r = await api.setApiKey('');
     keyState(r.hasKey, r.hint);
@@ -493,6 +756,10 @@ interface ResultsState {
   bin: Map<string, TreeNode>;
   progress: Progress;
   confirming: boolean;
+  /** Paths selected in the list (children of the current view). */
+  sel: Set<string>;
+  /** Index of the last row clicked, for shift-click ranges. */
+  anchor: number | null;
   keyHandler: (e: KeyboardEvent) => void;
 }
 let R: ResultsState | null = null;
@@ -529,7 +796,7 @@ async function showResults(root: string) {
         </div>
         <aside class="card panel">
           <div class="panel-head" id="panel-head"></div>
-          <div class="rows-head"><span>Contents</span><span>Size</span></div>
+          <div class="rows-head" id="rows-head"></div>
           <ol class="rows" id="rows"></ol>
         </aside>
       </div>
@@ -550,6 +817,11 @@ async function showResults(root: string) {
 
   const keyHandler = (e: KeyboardEvent) => {
     if ((e.target as HTMLElement).tagName === 'INPUT') return;
+    if (e.key === 'Escape' && R?.sel.size) {
+      R.sel.clear();
+      renderSelection();
+      return;
+    }
     if (document.getElementById('ai')) {
       if (e.key === 'Escape') closeAI();
       return;
@@ -561,7 +833,7 @@ async function showResults(root: string) {
   };
   window.addEventListener('keydown', keyHandler);
 
-  R = { rootPath, tree, chart, bin: new Map(), progress, confirming: false, keyHandler };
+  R = { rootPath, tree, chart, bin: new Map(), progress, confirming: false, sel: new Set(), anchor: null, keyHandler };
   // Let layout settle so the chart knows its size before the first sweep.
   requestAnimationFrame(() => {
     if (!R) return;
@@ -602,6 +874,8 @@ async function navigate(path: string, dir: 'in' | 'out' | 'none') {
   }
   if (!R) return;
   R.tree = tree;
+  R.sel.clear();
+  R.anchor = null;
   R.chart.render(tree, transition);
   renderAll();
 }
@@ -633,7 +907,7 @@ function renderCrumbs() {
           `<button class="crumb ${i === crumbs.length - 1 ? 'crumb-current' : ''}" data-path="${esc(c.path)}">${esc(c.name)}</button>`,
       )
       .join('<span class="crumb-sep">/</span>') +
-    `<span class="crumbs-spacer"></span><button class="crumb" id="rescan">Rescan ↻</button>`;
+    `<span class="crumbs-spacer"></span><span class="crumb-age">Scanned ${ago(R.progress.finishedAt)}</span><button class="crumb" id="rescan">Rescan ↻</button>`;
   el.querySelector('#rescan')?.addEventListener('click', () => R && void beginScan(R.rootPath));
   el.querySelector('[data-up]')?.addEventListener('click', goUp);
   el.querySelectorAll<HTMLElement>('[data-path]').forEach((b) =>
@@ -679,7 +953,7 @@ function renderPanel() {
       ${progress.errors ? `<span class="chip chip-warn" title="Couldn't read these. Grant Full Disk Access to include them.">${int(progress.errors)} unreadable</span>` : ''}
       ${unseen > 1e9 ? `<span class="chip chip-hatch" title="Used on disk but not visible to the scan: system files, APFS snapshots, purgeable space, or protected folders.">${bytes(unseen)} hidden / system</span>` : ''}
       <button class="chip chip-btn" data-reveal="${esc(tree.path)}">Reveal in Finder ↗</button>
-      <button class="chip chip-btn chip-ai" id="ask-here">What is this?</button>
+      <button class="chip chip-btn chip-ai" id="ask-here"><span class="ai-spark">✦</span> What is this?</button>
     </div>`;
   head.querySelector('#ask-here')?.addEventListener('click', () => void askAI(tree));
   head.querySelector<HTMLElement>('[data-reveal]')?.addEventListener('click', (e) => void reveal((e.currentTarget as HTMLElement).dataset.reveal!));
@@ -694,14 +968,14 @@ function renderPanel() {
           const drillable = k.type === 'dir' && k.hasKids;
           return `
           <li class="row ${drillable ? 'is-dir' : ''} ${k.opaque ? 'is-opaque' : ''} t-${k.type}" data-i="${i}" data-path="${esc(k.path)}">
-            <span class="row-rank">${String(i + 1).padStart(2, '0')}</span>
+            <span class="row-rank" data-act="select" title="Select (⌘-click, shift-click for a range)">${String(i + 1).padStart(2, '0')}</span>
             <span class="row-swatch" style="background:${childColor(i, k)}"></span>
             <span class="row-main">
               <span class="row-name">${esc(k.name)}${k.opaque ? `<span class="row-tag">${k.count ? `${int(k.count)} files` : 'summarized'}</span>` : ''}${drillable ? '<span class="row-go">→</span>' : ''}</span>
               <span class="row-bar"><span style="width:${((k.size / max) * 100).toFixed(2)}%;background:${childColor(i, k)}"></span></span>
             </span>
             <span class="row-size">${bytes(k.size)}<small>${share.toFixed(1)}%</small></span>
-            ${k.type !== 'rest' ? `<span class="row-actions"><button class="mini mini-ai" data-act="ask" title="What is this?">AI</button><button class="mini" data-act="reveal" title="Reveal in Finder">↗</button><button class="mini mini-bin" data-act="bin" title="Add to bin">+ Bin</button></span>` : '<span class="row-actions"></span>'}
+            ${k.type !== 'rest' ? `<span class="row-actions"><button class="mini mini-ai" data-act="ask" title="What is this?">✦ AI</button><button class="mini" data-act="reveal" title="Reveal in Finder">↗</button><button class="mini mini-bin" data-act="bin" title="Add to bin">+ Bin</button></span>` : '<span class="row-actions"></span>'}
           </li>`;
         })
         .join('')
@@ -727,7 +1001,9 @@ function renderPanel() {
         if (Math.hypot(ev.clientX - x, ev.clientY - y) > 6) {
           dragged = true;
           window.removeEventListener('pointermove', move);
-          beginDrag(k, ev);
+          const group = R && R.sel.has(k.path) ? selectedNodes() : [];
+          if (group.length > 1) beginDragMany(group, ev);
+          else beginDrag(k, ev);
         }
       };
       window.addEventListener('pointermove', move);
@@ -738,9 +1014,69 @@ function renderPanel() {
       if (act === 'bin') return addToBin(k);
       if (act === 'ask') return void askAI(k);
       if (act === 'reveal') return void reveal(k.path);
-      if (dragged) return;
+      if (dragged || !R) return;
+      const i = Number(row.dataset.i);
+      // Shift-click: select a range from the last clicked row.
+      if (e.shiftKey) {
+        const from = R.anchor ?? i;
+        const [a, b] = from < i ? [from, i] : [i, from];
+        for (let j = a; j <= b; j++) if (kids[j].type !== 'rest') R.sel.add(kids[j].path);
+        R.anchor = i;
+        return renderSelection();
+      }
+      // Cmd/Ctrl-click or clicking the row number: toggle one.
+      if (e.metaKey || e.ctrlKey || act === 'select') {
+        if (k.type === 'rest') return;
+        if (R.sel.has(k.path)) R.sel.delete(k.path);
+        else R.sel.add(k.path);
+        R.anchor = i;
+        return renderSelection();
+      }
+      R.anchor = i;
       if (k.type === 'dir' && k.hasKids) void navigate(k.path, 'in');
     });
+  });
+  renderSelection();
+}
+
+/** Selected nodes among the current view's children. */
+function selectedNodes(): TreeNode[] {
+  if (!R) return [];
+  return (R.tree.children ?? []).filter((k) => R!.sel.has(k.path));
+}
+
+function renderSelection() {
+  if (!R) return;
+  document.querySelectorAll<HTMLElement>('#rows .row').forEach((r) => r.classList.toggle('is-sel', R!.sel.has(r.dataset.path!)));
+  const head = document.getElementById('rows-head');
+  if (!head) return;
+  const sel = selectedNodes();
+  if (!sel.length) {
+    head.className = 'rows-head';
+    head.innerHTML = '<span>Contents</span><span>Size</span>';
+    return;
+  }
+  const total = sel.reduce((s, n) => s + n.size, 0);
+  head.className = 'rows-head is-selecting';
+  head.innerHTML = `
+    <span>${sel.length} selected · ${bytes(total)}</span>
+    <span class="sel-actions">
+      <button class="sel-btn" id="sel-all">All</button>
+      <button class="sel-btn sel-bin" id="sel-bin">+ Bin</button>
+      <button class="sel-btn" id="sel-clear">Clear</button>
+    </span>`;
+  head.querySelector('#sel-bin')!.addEventListener('click', () => {
+    for (const n of sel) addToBin(n, true);
+    R!.sel.clear();
+    renderSelection();
+  });
+  head.querySelector('#sel-all')!.addEventListener('click', () => {
+    for (const k of R!.tree.children ?? []) if (k.type !== 'rest') R!.sel.add(k.path);
+    renderSelection();
+  });
+  head.querySelector('#sel-clear')!.addEventListener('click', () => {
+    R!.sel.clear();
+    renderSelection();
   });
 }
 
@@ -833,11 +1169,21 @@ function beginDrag(node: TreeNode, e: PointerEvent) {
   startDrag(node, e, () => document.getElementById('bin'), addToBin);
 }
 
-function addToBin(n: TreeNode) {
+function beginDragMany(nodes: TreeNode[], e: PointerEvent) {
+  const total = nodes.reduce((s, n) => s + n.size, 0);
+  const proxy: TreeNode = { name: `${nodes.length} items`, path: '', size: total, count: 0, type: 'dir' };
+  startDrag(proxy, e, () => document.getElementById('bin'), () => {
+    for (const n of nodes) addToBin(n, true);
+    if (R) R.sel.clear();
+    renderSelection();
+  });
+}
+
+function addToBin(n: TreeNode, quiet = false) {
   if (!R || n.type === 'rest') return;
   for (const p of R.bin.keys()) {
     if (n.path === p || n.path.startsWith(p + '/')) {
-      toast('Already in the bin (or inside something that is).');
+      if (!quiet) toast('Already in the bin (or inside something that is).');
       return;
     }
   }

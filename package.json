@@ -2,7 +2,7 @@
   "name": "dirt",
   "productName": "DIRT",
   "version": "1.0.0",
-  "description": "Disk Inspection & Removal Tool \u2014 a brutalist disk space visualizer",
+  "description": "Disk Inspection & Removal Tool — a brutalist disk space visualizer",
   "private": true,
   "type": "module",
   "main": "electron/main.js",
@@ -11,7 +11,8 @@
     "build": "tsc && vite build",
     "start": "vite build && electron .",
     "dist": "tsc && vite build && electron-builder --mac",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "icon": "electron scripts/make-icon.cjs"
   },
   "build": {
     "appId": "app.dirt.disk",
@@ -34,7 +35,8 @@
           ]
         }
       ],
-      "identity": null
+      "identity": null,
+      "icon": "build/icon.icns"
     },
     "afterPack": "scripts/adhoc-sign.cjs",
     "dmg": {
@@ -44,9 +46,6 @@
   },
   "author": "",
   "license": "ISC",
-  "dependencies": {
-    "@anthropic-ai/sdk": "^1.8.0"
-  },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@fontsource-variable/archivo": "^5.3.0",
