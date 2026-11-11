@@ -25,7 +25,7 @@ Ask in plain English: *"find old installers in Downloads"*, *"which worktrees ca
 
 ![Ask DIRT](docs/ask.png)
 
-**The AI never sees file contents.** Only names, paths (home shown as `~`), sizes, dates and git status are sent.
+**The AI never sees file contents.** See [Data & privacy](#data--privacy) for exactly what is sent.
 
 ### Git projects
 Every repo DIRT finds, with each worktree's last use, size, dependencies and uncommitted/unpushed/merged status. You can diff a worktree against `main`, trash its `node_modules`/`target`, or remove it (changes are stashed first and the branch is kept). **Analyze ✦** has the AI sort a repo's ignored folders into build output you can regenerate versus data you can't.
@@ -41,9 +41,20 @@ Threads and memory budget for scans, plus your OpenRouter key and model. Model f
 2. Open it once. macOS will block it because it isn't notarized.
 3. System Settings → Privacy & Security → **Open Anyway**.
 
+DIRT can move files to the Trash and works best with Full Disk Access. If you'd rather not trust a prebuilt binary, [build it from source](#develop): `npm install && npm run dist` produces the same DMG.
+
 For whole-disk scans, add DIRT under System Settings → Privacy & Security → **Full Disk Access**.
 
-The AI features need an [OpenRouter](https://openrouter.ai) API key. Add it in Settings; it's stored encrypted with your macOS Keychain.
+The AI features need an [OpenRouter](https://openrouter.ai) API key. Add it in Settings.
+
+## Data & privacy
+
+- **Scanning is local.** Nothing leaves your Mac unless you use an ✦ AI feature.
+- **What the AI sees:** file and folder names, paths (your home folder shown as `~`), sizes, dates, Spotlight metadata (kind, last opened) and git status (branch, uncommitted/unpushed counts, merged or not). **Never file contents.**
+- **Where it goes:** to [OpenRouter](https://openrouter.ai), and from there to the model you picked in Settings. Requests are tagged with the app name `DIRT`. Nothing is sent if no key is set.
+- **Your API key** is stored in plain text at `~/Library/Application Support/DIRT/openrouter-key`, readable only by your user (permissions `0600`), the same way tools like `gh`, `npm` and the AWS CLI store tokens. It is not in the Keychain: unsigned builds change identity on every update, which made macOS ask for your login password after each install. Remove it any time from Settings.
+- **Deleting:** DIRT only ever moves items to the Trash, after a confirm. Worktree removal stashes uncommitted changes first and keeps the branch.
+- **No telemetry, no analytics, no accounts.**
 
 ## Develop
 
@@ -61,3 +72,11 @@ Regenerate the README screenshots (uses `/Applications` so nothing personal show
 ```sh
 npm run build && DIRT_SCREENSHOTS=docs OPENROUTER_API_KEY=… npx electron .
 ```
+
+## Contributing
+
+Issues and PRs welcome. See [CONTRIBUTING.md](CONTRIBUTING.md). To report a security problem privately, see [SECURITY.md](SECURITY.md).
+
+## License
+
+[MIT](LICENSE)

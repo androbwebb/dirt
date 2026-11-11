@@ -44,8 +44,16 @@
       "artifactName": "DIRT-${version}-universal.dmg"
     }
   },
-  "author": "",
-  "license": "ISC",
+  "author": "androbwebb",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/androbwebb/dirt.git"
+  },
+  "homepage": "https://github.com/androbwebb/dirt",
+  "bugs": {
+    "url": "https://github.com/androbwebb/dirt/issues"
+  },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@fontsource-variable/archivo": "^5.3.0",
