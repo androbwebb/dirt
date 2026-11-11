@@ -329,6 +329,22 @@ function makeTools({ ask }) {
               additionalProperties: false,
             },
           },
+          commands: {
+            type: 'array',
+            maxItems: 8,
+            description:
+              'ONLY for developer tooling questions (Docker, npm/pnpm/yarn, Homebrew, Xcode/simulators, cargo, pip/conda, git, etc.): terminal commands the user can copy/paste to reclaim space the right way. Omit for ordinary files.',
+            items: {
+              type: 'object',
+              properties: {
+                command: { type: 'string', description: 'One shell command, ready to paste.' },
+                description: { type: 'string', description: 'What it does and roughly how much it frees, max ~16 words.' },
+                risk: { type: 'string', enum: ['safe', 'caution', 'destructive'] },
+              },
+              required: ['command', 'description', 'risk'],
+              additionalProperties: false,
+            },
+          },
         },
         required: ['title', 'summary', 'items'],
         additionalProperties: false,
@@ -352,7 +368,8 @@ How to work:
 - Finish by calling show_results exactly once with the concrete items (most important first) and a short summary. If nothing matches, call show_results with an empty items list and say so.
 - Verdicts: safe = regenerable/re-downloadable/obviously disposable; caution = probably fine but has a cost or you are unsure; keep = user data or in active use.
 - For worktrees: missing folders, merged branches and stale ones with no unpushed/uncommitted work are good candidates; flag unpushed or uncommitted work as caution.
-- Never list system paths (/System, /usr, /bin, /Library) as safe.`;
+- Never list system paths (/System, /usr, /bin, /Library) as safe.
+- Terminal commands: only when the user asks about developer tooling (Docker, package managers, Xcode, toolchains, git) or when that tool's own CLI is the correct way to reclaim the space. Prefer the tool's native cleanup (docker system prune, docker builder prune, brew cleanup, npm cache clean --force, pnpm store prune, xcrun simctl delete unavailable, cargo clean, git worktree prune) over rm -rf. Order from least to most destructive and mark risk honestly (destructive = deletes data that can't be re-downloaded or rebuilt, like Docker volumes). The user runs them; you never can. Never suggest sudo, and never touch system paths.`;
 
 // ---------- loop ----------
 /**
@@ -465,7 +482,7 @@ function summarize(name, r) {
 }
 
 /** Attach real sizes/dates to the items the model chose to show. */
-async function enrichResults({ title, summary, items }, ask) {
+async function enrichResults({ title, summary, items, commands }, ask) {
   const list = (items || []).slice(0, 200).map((i) => ({ ...i, abs: expand(i.path) }));
   const scanSizes = (await ask('sizes', { paths: list.map((i) => i.abs) }).catch(() => ({}))) || {};
   const stats = await pool(list, 16, (i) => statEntry(i.abs));
@@ -491,5 +508,9 @@ async function enrichResults({ title, summary, items }, ask) {
       group: i.group || null,
     };
   });
-  return { title, summary, items: enriched, total: enriched.reduce((s, i) => s + (i.size || 0), 0) };
+  const safeCommands = (commands || [])
+    .filter((c) => c && typeof c.command === 'string' && c.command.trim() && !/\bsudo\b/.test(c.command))
+    .slice(0, 8)
+    .map((c) => ({ command: c.command.trim(), description: String(c.description || ''), risk: ['safe', 'caution', 'destructive'].includes(c.risk) ? c.risk : 'caution' }));
+  return { title, summary, items: enriched, commands: safeCommands, total: enriched.reduce((s, i) => s + (i.size || 0), 0) };
 }

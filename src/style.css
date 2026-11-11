@@ -2865,3 +2865,97 @@ body.dragging .bin {
 .ask-prompt .ai-spark {
   font-size: 2em;
 }
+
+/* suggested terminal commands */
+.cmds {
+  border-bottom: var(--bw) solid var(--ink);
+  background: #0d0d0d;
+  color: #f2eee6;
+  padding: 14px 18px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.cmds-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--acid);
+}
+.cmds-head small {
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: none;
+  color: #9d978b;
+}
+.cmd {
+  border: 2px solid #3a3833;
+  background: #161513;
+}
+.cmd.r-caution {
+  border-color: var(--acid);
+}
+.cmd.r-destructive {
+  border-color: var(--red);
+}
+.cmd-line {
+  display: flex;
+  align-items: stretch;
+}
+.cmd-prompt {
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  color: var(--acid);
+  font-family: var(--mono);
+  font-weight: 800;
+}
+.cmd-code {
+  flex: 1;
+  min-width: 0;
+  padding: 11px 4px;
+  font-family: var(--mono);
+  font-size: 14px;
+  font-weight: 600;
+  color: #fff;
+  overflow-x: auto;
+  white-space: pre;
+  user-select: text;
+}
+.cmd-copy {
+  border: 0;
+  border-left: 2px solid #3a3833;
+  background: var(--acid);
+  color: #0d0d0d;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 0 18px;
+  min-width: 96px;
+}
+.cmd-copy:hover {
+  background: #fff;
+}
+.cmd-copy.is-copied {
+  background: var(--green);
+}
+.cmd-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 12px 9px;
+  border-top: 1px solid #3a3833;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: #c9c3b6;
+}
+.cmd-meta .vbadge {
+  border-color: #0d0d0d;
+}

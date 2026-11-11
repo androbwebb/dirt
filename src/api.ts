@@ -106,10 +106,17 @@ export interface ResultItem {
   isWorktree?: boolean;
 }
 
+export interface SuggestedCommand {
+  command: string;
+  description: string;
+  risk: 'safe' | 'caution' | 'destructive';
+}
+
 export interface ResultsPage {
   title: string;
   summary: string;
   items: ResultItem[];
+  commands?: SuggestedCommand[];
   total: number;
   model?: string;
 }
@@ -181,6 +188,7 @@ export const api = {
   trashPaths: (paths: string[]) => call<{ trashed: string[]; failed: { path: string; error: string }[] }>('trashPaths', { paths }),
   worktreeDiff: (path: string) => call<WorktreeDiff>('worktreeDiff', { path }),
   revealPath: (path: string) => call<{ ok: true }>('revealPath', { path }),
+  copyText: (text: string) => call<{ ok: true }>('copyText', { text }),
   projects: (refresh = false) => call<{ roots: string[]; repos: Project[] }>('projects', { refresh }),
   removeWorktree: (path: string) => call<{ repo: string; stashed: boolean }>('removeWorktree', { path }),
   pruneWorktrees: (repo: string) => call<{ ok: true }>('pruneWorktrees', { repo }),

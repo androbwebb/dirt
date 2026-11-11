@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell, utilityProcess, nativeTheme, Notification, safeStorage } from 'electron';
+import { app, BrowserWindow, ipcMain, shell, utilityProcess, nativeTheme, Notification, safeStorage, clipboard } from 'electron';
 import { explain, listModels, families, resolveModel, DEFAULT_MODEL } from './ai.js';
 import { runAgent } from './agent.js';
 import { listProjects, defaultRoots, removeWorktree, pruneWorktrees, analyzeRepo } from './git.js';
@@ -315,6 +315,10 @@ const api = {
   },
   async analyzeRepo({ repo }) {
     return analyzeRepo(repo, { apiKey: await readApiKey(), model: await resolveModel(settings.aiModel) });
+  },
+  copyText({ text }) {
+    clipboard.writeText(String(text ?? ''));
+    return { ok: true };
   },
   async revealPath({ path: p }) {
     await fsp.lstat(p);

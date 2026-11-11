@@ -1,6 +1,6 @@
 // "Ask DIRT": chat-style agent view with a live step list and an actionable
 // results page (bulk select, reveal, move to Trash, worktree diff).
-import { api, type AgentEvent, type ResultItem, type WorktreeDiff } from './api';
+import { api, type AgentEvent, type ResultItem, type SuggestedCommand, type WorktreeDiff } from './api';
 import { ago, bytes, esc, int } from './format';
 
 interface Step {
@@ -15,6 +15,7 @@ interface Step {
 interface Page {
   title: string;
   summary: string;
+  commands?: SuggestedCommand[];
   items: (ResultItem & { trashed?: boolean })[];
   total: number;
   model?: string;
@@ -82,7 +83,7 @@ export function createAsk(deps: Deps) {
         t.thoughts.push(e.text);
         break;
       case 'results':
-        t.page = { title: e.title, summary: e.summary, items: e.items, total: e.total, model: e.model };
+        t.page = { title: e.title, summary: e.summary, items: e.items, commands: e.commands, total: e.total, model: e.model };
         // Pre-select the "safe" items so the obvious cleanup is one click.
         for (const i of e.items) if (i.verdict === 'safe' && !i.missing) t.sel.add(i.path);
         t.steps.forEach((s) => s.tool === 'show_results' && (s.status = 'done'));
@@ -292,6 +293,7 @@ export function createAsk(deps: Deps) {
             <span class="rp-total-label">${int(live.length)} item${live.length === 1 ? '' : 's'}</span>
           </div>
         </header>
+        ${renderCommands(p.commands)}
         <div class="rp-filters">
           ${(['all', 'safe', 'caution', 'keep'] as const)
             .map((f) => {
@@ -325,9 +327,44 @@ export function createAsk(deps: Deps) {
       </section>`;
   }
 
+  function renderCommands(cmds?: SuggestedCommand[]): string {
+    if (!cmds?.length) return '';
+    const RISK: Record<string, string> = { safe: 'Safe', caution: 'Caution', destructive: 'Destructive' };
+    return `
+      <div class="cmds">
+        <div class="cmds-head"><span>Terminal</span><small>Copy &amp; paste · DIRT never runs these</small></div>
+        ${cmds
+          .map(
+            (c, k) => `
+          <div class="cmd r-${c.risk}">
+            <div class="cmd-line">
+              <span class="cmd-prompt">$</span>
+              <code class="cmd-code">${esc(c.command)}</code>
+              <button class="cmd-copy" data-copy="${k}">Copy</button>
+            </div>
+            <div class="cmd-meta"><span class="vbadge vb-${c.risk === 'destructive' ? 'keep' : c.risk}">${RISK[c.risk] ?? c.risk}</span><span class="cmd-desc">${esc(c.description)}</span></div>
+          </div>`,
+          )
+          .join('')}
+      </div>`;
+  }
+
   function bindTurn(t: Turn, i: number) {
     const el = document.querySelector<HTMLElement>(`.turn[data-turn="${i}"]`);
     if (!el) return;
+    el.querySelectorAll<HTMLButtonElement>('[data-copy]').forEach((b) =>
+      b.addEventListener('click', async () => {
+        const cmd = t.page?.commands?.[Number(b.dataset.copy)];
+        if (!cmd) return;
+        await api.copyText(cmd.command);
+        b.textContent = 'Copied ✓';
+        b.classList.add('is-copied');
+        setTimeout(() => {
+          b.textContent = 'Copy';
+          b.classList.remove('is-copied');
+        }, 1500);
+      }),
+    );
     el.querySelector('[data-act="settings"]')?.addEventListener('click', () => deps.openSettings());
     if (!t.page) return;
     const items = visibleItems(t);
