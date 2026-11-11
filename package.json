@@ -1,0 +1,75 @@
+{
+  "name": "dirt",
+  "productName": "DIRT",
+  "version": "1.0.0",
+  "description": "Disk Inspection & Removal Tool \u2014 a brutalist disk space visualizer",
+  "private": true,
+  "type": "module",
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "node scripts/dev.js",
+    "build": "tsc && vite build",
+    "start": "vite build && electron .",
+    "dist": "tsc && vite build && electron-builder --mac",
+    "lint": "eslint ."
+  },
+  "build": {
+    "appId": "app.dirt.disk",
+    "productName": "DIRT",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**",
+      "electron/**",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.utilities",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "universal"
+          ]
+        }
+      ],
+      "identity": null
+    },
+    "afterPack": "scripts/adhoc-sign.cjs",
+    "dmg": {
+      "title": "DIRT ${version}",
+      "artifactName": "DIRT-${version}-universal.dmg"
+    }
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.8.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@fontsource-variable/archivo": "^5.3.0",
+    "@fontsource-variable/jetbrains-mono": "^5.3.0",
+    "@types/d3-ease": "^3.0.2",
+    "@types/d3-hierarchy": "^3.1.7",
+    "@types/d3-interpolate": "^3.0.4",
+    "@types/d3-selection": "^3.0.12",
+    "@types/d3-shape": "^3.2.0",
+    "@types/d3-transition": "^3.0.9",
+    "@types/node": "^26.6.6",
+    "d3-ease": "^3.0.2",
+    "d3-hierarchy": "^3.1.3",
+    "d3-interpolate": "^3.0.2",
+    "d3-selection": "^3.0.1",
+    "d3-shape": "^3.2.1",
+    "d3-transition": "^3.0.2",
+    "electron": "^45.3.0",
+    "electron-builder": "^26.18.0",
+    "eslint": "^10.14.0",
+    "globals": "^17.14.0",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.72.2",
+    "vite": "^8.3.8"
+  }
+}
