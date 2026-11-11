@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell, utilityProcess, nativeTheme, Notification, safeStorage, clipboard } from 'electron';
+import { app, BrowserWindow, ipcMain, shell, utilityProcess, nativeTheme, Notification, clipboard } from 'electron';
 import { explain, listModels, families, resolveModel, DEFAULT_MODEL } from './ai.js';
 import { runAgent } from './agent.js';
 import { listProjects, defaultRoots, removeWorktree, pruneWorktrees, analyzeRepo } from './git.js';
@@ -31,27 +31,32 @@ function sanitize(s) {
   };
 }
 
-// ---------- OpenRouter API key (encrypted with the macOS Keychain) ----------
-const keyFile = () => path.join(app.getPath('userData'), 'openrouter-key.bin');
+// ---------- OpenRouter API key ----------
+// Stored in a file only your user can read (0600), like most CLI tools do.
+// Not the Keychain: ad-hoc signed builds change identity on every update, which
+// made macOS re-prompt for the Keychain password after each install.
+const keyFile = () => path.join(app.getPath('userData'), 'openrouter-key');
+const legacyKeyFile = () => path.join(app.getPath('userData'), 'openrouter-key.bin');
 
 async function readApiKey() {
   // Dev/automation convenience: an env key wins over the stored one.
   if (process.env.OPENROUTER_API_KEY) return process.env.OPENROUTER_API_KEY;
   try {
-    return safeStorage.decryptString(await fsp.readFile(keyFile()));
+    return (await fsp.readFile(keyFile(), 'utf8')).trim() || null;
   } catch {
     return null;
   }
 }
 
 async function writeApiKey(key) {
+  await fsp.rm(legacyKeyFile(), { force: true });
   if (!key) {
     await fsp.rm(keyFile(), { force: true });
     return;
   }
-  if (!safeStorage.isEncryptionAvailable()) throw new Error('Keychain encryption is unavailable');
   await fsp.mkdir(path.dirname(keyFile()), { recursive: true });
-  await fsp.writeFile(keyFile(), safeStorage.encryptString(key), { mode: 0o600 });
+  await fsp.writeFile(keyFile(), key, { mode: 0o600 });
+  await fsp.chmod(keyFile(), 0o600);
 }
 
 async function loadSettings() {
@@ -63,6 +68,9 @@ async function loadSettings() {
 }
 
 app.setName('DIRT');
+// DIRT stores no cookies or passwords, so keep Chromium from touching the
+// Keychain ("DIRT Safe Storage") at all.
+app.commandLine.appendSwitch('use-mock-keychain');
 
 // ---------- scan worker ----------
 let worker = null;

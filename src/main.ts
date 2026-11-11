@@ -505,13 +505,8 @@ async function showSettings() {
       <article class="card setting setting-wide" style="--accent:${PALETTE[4]}">
         <div class="setting-head">
           <h2>OpenRouter</h2>
-          <div class="key-state ${info.apiKey.hasKey ? 'is-set' : ''}" id="key-state">${info.apiKey.hasKey ? `Saved ••••${esc(info.apiKey.hint ?? '')}` : 'Not set'}</div>
         </div>
-        <form class="custom" id="key-form">
-          <input id="key-input" type="password" spellcheck="false" autocomplete="off" placeholder="sk-or-…" />
-          <button class="btn btn-acid" type="submit">Save</button>
-          <button class="btn" type="button" id="key-clear" ${info.apiKey.hasKey ? '' : 'hidden'}>Remove</button>
-        </form>
+        <div id="key-box"></div>
         <div class="families" id="families"><div class="fam-loading">Loading models…</div></div>
         <details class="all-models" id="all-models">
           <summary>All models</summary>
@@ -571,27 +566,45 @@ async function showSettings() {
       void save();
     }),
   );
-  const keyState = (hasKey: boolean, hint: string | null) => {
-    const el = document.getElementById('key-state');
-    if (el) {
-      el.textContent = hasKey ? `Saved ••••${hint ?? ''}` : 'Not set';
-      el.classList.toggle('is-set', hasKey);
+  // API key: a locked "saved" field once set; Clear brings back the input.
+  const renderKey = (hasKey: boolean, hint: string | null) => {
+    const box = document.getElementById('key-box');
+    if (!box) return;
+    if (hasKey) {
+      box.innerHTML = `
+        <div class="custom key-row">
+          <div class="key-saved"><span class="key-saved-tag">Saved</span><code class="key-saved-val">sk-or-••••••••••••${esc(hint ?? '')}</code></div>
+          <button class="btn" type="button" id="key-clear">Clear</button>
+        </div>`;
+      box.querySelector('#key-clear')!.addEventListener('click', async () => {
+        try {
+          const r = await api.setApiKey('');
+          renderKey(r.hasKey, r.hint);
+          (document.getElementById('key-input') as HTMLInputElement | null)?.focus();
+        } catch (err) {
+          toast((err as Error).message, 'err');
+        }
+      });
+      return;
     }
-    const clear = document.getElementById('key-clear');
-    if (clear) clear.hidden = !hasKey;
+    box.innerHTML = `
+      <form class="custom key-row" id="key-form">
+        <input id="key-input" type="password" spellcheck="false" autocomplete="off" placeholder="sk-or-…" />
+        <button class="btn btn-acid" type="submit">Save</button>
+      </form>`;
+    box.querySelector('#key-form')!.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const input = document.getElementById('key-input') as HTMLInputElement;
+      if (!input.value.trim()) return;
+      try {
+        const r = await api.setApiKey(input.value);
+        renderKey(r.hasKey, r.hint);
+      } catch (err) {
+        toast((err as Error).message, 'err');
+      }
+    });
   };
-  document.getElementById('key-form')!.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const input = document.getElementById('key-input') as HTMLInputElement;
-    if (!input.value.trim()) return;
-    try {
-      const r = await api.setApiKey(input.value);
-      input.value = '';
-      keyState(r.hasKey, r.hint);
-    } catch (err) {
-      toast((err as Error).message, 'err');
-    }
-  });
+  renderKey(info.apiKey.hasKey, info.apiKey.hint);
   // Model picker: "@latest" families as big buttons, plus the full list.
   const famEl = document.getElementById('families')!;
   const sel = document.getElementById('model-select') as HTMLSelectElement;
@@ -659,10 +672,6 @@ async function showSettings() {
     .catch((err) => {
       famEl.innerHTML = `<div class="ai-error">${esc((err as Error).message)}</div>`;
     });
-  document.getElementById('key-clear')!.addEventListener('click', async () => {
-    const r = await api.setApiKey('');
-    keyState(r.hasKey, r.hint);
-  });
   document.getElementById('reset')!.addEventListener('click', () => {
     rT.value = String(defaults.threads);
     rM.value = String(defaults.memoryMb);

@@ -35,7 +35,7 @@ export async function captureScreens(win, outDir, app) {
     if (only === 'settings') {
       await click('#settings-btn');
       await waitFor('.fam', 30_000);
-      await js(`(() => { const k = document.getElementById('key-state'); if (k) k.textContent = 'Saved'; return true; })()`);
+      await js(`(() => { const k = document.querySelector('.key-saved-val'); if (k) k.textContent = 'sk-or-••••••••••••••••'; return true; })()`);
       await shot('settings.png');
       return;
     }
@@ -68,7 +68,7 @@ export async function captureScreens(win, outDir, app) {
     await click('#settings-btn');
     await waitFor('.fam', 30_000);
     // Never show any part of the API key in screenshots.
-    await js(`(() => { const k = document.getElementById('key-state'); if (k) k.textContent = 'Saved'; return true; })()`);
+    await js(`(() => { const k = document.querySelector('.key-saved-val'); if (k) k.textContent = 'sk-or-••••••••••••••••'; return true; })()`);
     await shot('settings.png');
   } catch (e) {
     console.error('screenshot run failed:', e.message);

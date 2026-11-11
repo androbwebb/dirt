@@ -2959,3 +2959,41 @@ body.dragging .bin {
 .cmd-meta .vbadge {
   border-color: #0d0d0d;
 }
+
+/* saved API key */
+.key-row {
+  align-items: stretch;
+}
+.key-saved {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: stretch;
+  border: var(--bw) solid var(--ink);
+  background: var(--green);
+  color: #0d0d0d;
+}
+.key-saved-tag {
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  background: #0d0d0d;
+  color: var(--green);
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.key-saved-val {
+  display: flex;
+  align-items: center;
+  padding: 16px 18px;
+  font-family: var(--mono);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
