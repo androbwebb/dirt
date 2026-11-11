@@ -284,6 +284,32 @@ const api = {
     return res;
   },
   scans: () => ask('list'),
+  /** First folder (alphabetically, case-insensitive) whose name starts with the last path segment. */
+  async completePath({ partial }) {
+    if (typeof partial !== 'string') return { name: null };
+    const slash = partial.lastIndexOf('/');
+    const prefix = partial.slice(slash + 1);
+    if (slash < 0 || !prefix) return { name: null };
+    const dir = path.resolve((partial.slice(0, slash) || '/').replace(/^~(?=$|\/)/, HOME));
+    let entries;
+    try {
+      entries = await fsp.readdir(dir, { withFileTypes: true });
+    } catch {
+      return { name: null };
+    }
+    const lower = prefix.toLowerCase();
+    const hits = entries
+      .filter((e) => e.name.toLowerCase().startsWith(lower) && (prefix.startsWith('.') || !e.name.startsWith('.')))
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+    for (const e of hits) {
+      if (e.isDirectory()) return { name: e.name };
+      if (e.isSymbolicLink()) {
+        const st = await fsp.stat(path.join(dir, e.name)).catch(() => null);
+        if (st?.isDirectory()) return { name: e.name };
+      }
+    }
+    return { name: null };
+  },
   async explain({ root, path: p }) {
     // Pull the node from the scan itself (not from the renderer) with one level of children.
     const { tree } = await ask('tree', { root, path: p, depth: 1 });

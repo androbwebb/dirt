@@ -546,6 +546,45 @@ main {
   box-shadow: 6px 6px 0 var(--acid);
 }
 
+/* Path autocomplete: the input sits on a transparent background over a ghost layer. */
+.path-field {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  background: var(--paper);
+}
+.path-field:focus-within {
+  background: var(--bg);
+}
+.path-field input {
+  position: relative;
+  background: transparent;
+}
+.path-field input:focus {
+  background: transparent;
+}
+.path-ghost {
+  position: absolute;
+  inset: 0;
+  padding: 16px 18px;
+  border: var(--bw) solid transparent;
+  font-family: var(--mono);
+  font-size: 16px;
+  font-weight: 600;
+  white-space: pre;
+  overflow: hidden;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+}
+.ghost-typed {
+  visibility: hidden;
+}
+.ghost-rest {
+  color: var(--muted);
+}
+
 .fineprint {
   margin-top: 40px;
   font-family: var(--mono);

@@ -240,7 +240,10 @@ async function showHome() {
 
       <h3 class="section-label"><span>04</span> Anywhere</h3>
       <form class="custom" id="custom">
-        <input id="custom-path" type="text" spellcheck="false" autocomplete="off" placeholder="~/Projects or /Volumes/Archive" />
+        <div class="path-field">
+          <div class="path-ghost" aria-hidden="true"><span class="ghost-typed"></span><span class="ghost-rest"></span></div>
+          <input id="custom-path" type="text" spellcheck="false" autocomplete="off" placeholder="~/Projects or /Volumes/Archive" />
+        </div>
         <button class="btn btn-acid" type="submit">Scan <span class="arrow">→</span></button>
       </form>
     </section>`;
@@ -261,6 +264,7 @@ async function showHome() {
   void loadProjects(false);
   view.querySelectorAll<HTMLElement>('[data-goto]').forEach((b) => b.addEventListener('click', () => openScan(b.dataset.goto!)));
   view.querySelectorAll<HTMLElement>('[data-scan]').forEach((b) => b.addEventListener('click', () => void beginScan(b.dataset.scan!)));
+  wirePathAutocomplete(document.getElementById('custom-path') as HTMLInputElement);
   document.getElementById('custom')!.addEventListener('submit', (e) => {
     e.preventDefault();
     const raw = (document.getElementById('custom-path') as HTMLInputElement).value.trim();
@@ -268,6 +272,75 @@ async function showHome() {
     const v = raw.replace(/^~(?=$|\/)/, home).replace(/\/+$/, '') || '/';
     if (stateOf(v)) return openScan(v);
     void beginScan(v);
+  });
+}
+
+/**
+ * Finder-style ⌘⇧G completion: one ghosted folder suggestion after the caret.
+ * Tab (or → at the end) accepts it, Esc dismisses it.
+ */
+function wirePathAutocomplete(input: HTMLInputElement) {
+  const ghost = input.parentElement!.querySelector<HTMLElement>('.path-ghost')!;
+  const typedEl = ghost.querySelector<HTMLElement>('.ghost-typed')!;
+  const restEl = ghost.querySelector<HTMLElement>('.ghost-rest')!;
+  let completion: string | null = null;
+  let seq = 0;
+
+  const clear = () => {
+    completion = null;
+    typedEl.textContent = restEl.textContent = '';
+  };
+
+  const suggest = async () => {
+    const id = ++seq;
+    const value = input.value;
+    const atEnd = input.selectionStart === value.length && input.selectionEnd === value.length;
+    if (!atEnd || !value.includes('/') || value.endsWith('/')) return clear();
+    let name: string | null = null;
+    try {
+      ({ name } = await api.completePath(value));
+    } catch {
+      /* treat as no match */
+    }
+    if (id !== seq || input.value !== value) return;
+    const prefix = value.slice(value.lastIndexOf('/') + 1);
+    if (!name || name.length < prefix.length) return clear();
+    completion = value.slice(0, value.length - prefix.length) + name + '/';
+    // Typed text stays as-is (case included); only the remainder is ghosted.
+    typedEl.textContent = value;
+    restEl.textContent = name.slice(prefix.length) + '/';
+    // Long paths scroll inside the input; the overlay can't follow, so hide it.
+    if (input.scrollWidth > input.clientWidth) ghost.style.visibility = 'hidden';
+    else ghost.style.visibility = '';
+  };
+
+  const accept = () => {
+    if (!completion) return false;
+    input.value = completion;
+    input.setSelectionRange(completion.length, completion.length);
+    clear();
+    void suggest();
+    return true;
+  };
+
+  input.addEventListener('input', () => void suggest());
+  input.addEventListener('blur', clear);
+  input.addEventListener('focus', () => void suggest());
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Tab' && !e.shiftKey && completion) {
+      e.preventDefault();
+      accept();
+    } else if (e.key === 'ArrowRight' && completion && input.selectionStart === input.value.length) {
+      e.preventDefault();
+      accept();
+    } else if (e.key === 'Escape' && completion) {
+      e.preventDefault();
+      seq++;
+      clear();
+    } else if (e.key === 'ArrowLeft' || e.key === 'Home') {
+      seq++;
+      clear();
+    }
   });
 }
 

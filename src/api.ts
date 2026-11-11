@@ -178,6 +178,7 @@ export const api = {
   locations: () => call<{ volumes: Volume[]; places: Place[]; home: string }>('locations'),
   scan: (path: string) => call<Progress>('scan', { path }),
   scans: () => call<Progress[]>('scans'),
+  completePath: (partial: string) => call<{ name: string | null }>('completePath', { partial }),
   getSettings: () => call<SettingsInfo>('getSettings'),
   setApiKey: (key: string) => call<{ hasKey: boolean; hint: string | null }>('setApiKey', { key }),
   explain: (root: string, path: string) => call<Explanation>('explain', { root, path }),
